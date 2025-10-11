@@ -4,6 +4,8 @@ const mongoose = require('mongoose');
 
 const PORT = process.env.PORT || 4000;
 const MONGO_URI = process.env.MONGO_URI;
+console.log("✅ Loaded Default Twilio Number:", process.env.DEFAULT_TWILIO_NUMBER);
+
 
 mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
   .then(() => {
