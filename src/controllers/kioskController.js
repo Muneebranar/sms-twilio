@@ -2,9 +2,10 @@ const Business = require("../models/Business");
 const Checkin = require("../models/Checkin");
 const InboundEvent = require("../models/InboundEvent");
 const { sendComplianceSms } = require("../services/twilioService");
+const twilio = require("twilio");
 
 /**
- * POST /api/checkin
+ * 🟢 POST /api/checkin
  * Handles customer check-in for a given business.
  * Sends compliance SMS only on first check-in.
  */
@@ -23,14 +24,17 @@ exports.checkin = async (req, res) => {
       return res.status(404).json({ error: "Business not found" });
     }
 
-    // 🔹 Check if customer has checked in before
-    const existingCheckin = await Checkin.findOne({ phoneNumber: phone, businessId: business._id });
+    // 🔹 Check if this phone already checked in for this business
+    const existingCheckin = await Checkin.findOne({
+      phoneNumber: phone,
+      businessId: business._id,
+    });
 
-    // 🔹 Choose Twilio number: business-specific or default
+    // 🔹 Choose Twilio number (business specific or default)
     const fromNumber = business.twilioNumber || process.env.DEFAULT_TWILIO_NUMBER;
     console.log(`📞 Using Twilio number: ${fromNumber}`);
 
-    // 🔹 Send compliance SMS only for first-time check-in
+    // 🔹 Send compliance SMS only on first-time check-in
     if (!existingCheckin) {
       try {
         await sendComplianceSms(business, phone, fromNumber);
@@ -39,10 +43,10 @@ exports.checkin = async (req, res) => {
         console.error("❌ Failed to send compliance SMS:", smsErr.message);
       }
     } else {
-      console.log("ℹ️ Returning customer — SMS not resent.");
+      console.log("ℹ️ Returning customer — compliance SMS not resent.");
     }
 
-    // 🔹 Create a check-in record
+    // 🔹 Save check-in record
     const checkin = await Checkin.create({
       businessId: business._id,
       phoneNumber: phone,
@@ -53,14 +57,14 @@ exports.checkin = async (req, res) => {
 
     console.log("💾 Check-in saved:", checkin._id);
 
-    // (Milestone 3 integration will handle rewards here)
+    // 🔹 Respond
     res.json({
       ok: true,
       checkinId: checkin._id,
       businessName: business.name,
       phone,
       points: business.rewardPoints || 1,
-      newReward: null,
+      newReward: null, // placeholder for future rewards logic
     });
   } catch (err) {
     console.error("💥 Server error in check-in:", err);
@@ -69,21 +73,26 @@ exports.checkin = async (req, res) => {
 };
 
 /**
- * POST /api/twilio/webhook
- * Handles incoming STOP/START/HELP messages.
+ * 💬 POST /api/twilio/webhook
+ * Handles incoming STOP / START / HELP / OTHER messages from Twilio.
+ * Logs event, updates subscription status, and auto-replies.
  */
 exports.twilioWebhook = async (req, res) => {
   try {
     const { From, Body } = req.body;
     const incoming = Body ? Body.trim().toUpperCase() : "";
+
+    // 🔹 Try to find existing checkin by sender’s phone
     const checkin = await Checkin.findOne({ phoneNumber: From }) || null;
 
+    // 🔹 Detect message type
     let eventType = "OTHER";
     if (incoming.includes("STOP")) eventType = "STOP";
     else if (incoming.includes("START")) eventType = "START";
     else if (incoming.includes("HELP")) eventType = "HELP";
 
-    const event = await InboundEvent.create({
+    // 🔹 Save event log
+    await InboundEvent.create({
       fromNumber: From,
       body: Body,
       eventType,
@@ -91,21 +100,41 @@ exports.twilioWebhook = async (req, res) => {
       raw: req.body,
     });
 
+    // 🔹 Update checkin subscription status
     if (checkin) {
-      checkin.unsubscribed = eventType === "STOP";
+      if (eventType === "STOP") checkin.unsubscribed = true;
+      else if (eventType === "START") checkin.unsubscribed = false;
       await checkin.save();
     }
 
-    console.log(`📩 Webhook event received: ${eventType}`);
-    res.send("<Response></Response>");
+    console.log(`📩 Webhook event received from ${From}: ${eventType}`);
+
+    // 🔹 Prepare TwiML auto-response
+    const twiml = new twilio.twiml.MessagingResponse();
+
+    if (eventType === "STOP") {
+      twiml.message("You have been unsubscribed. Reply START to rejoin.");
+    } else if (eventType === "START") {
+      twiml.message("You are now subscribed again. Thank you!");
+    } else if (eventType === "HELP") {
+      twiml.message("Reply START to subscribe again or STOP to unsubscribe.");
+    } else {
+      // For any other message
+      twiml.message("Thanks for your message! We'll get back to you soon.");
+    }
+
+    // 🔹 Send XML response back to Twilio
+    res.type("text/xml").send(twiml.toString());
   } catch (err) {
     console.error("💥 Webhook error:", err);
     res.status(500).send("<Response></Response>");
   }
 };
 
-
-
+/**
+ * 🏪 GET /api/kiosk/:slug
+ * Returns business (kiosk) details by slug.
+ */
 exports.getKioskBySlug = async (req, res) => {
   try {
     const { slug } = req.params;
@@ -113,7 +142,7 @@ exports.getKioskBySlug = async (req, res) => {
 
     const business = await Business.findOne({ slug });
     if (!business) {
-      return res.status(404).json({ error: 'Business not found' });
+      return res.status(404).json({ error: "Business not found" });
     }
 
     res.json({
@@ -122,7 +151,7 @@ exports.getKioskBySlug = async (req, res) => {
       message: `Loaded kiosk for ${business.name}`,
     });
   } catch (err) {
-    console.error('❌ Failed to load kiosk:', err);
-    res.status(500).json({ error: 'server error' });
+    console.error("❌ Failed to load kiosk:", err);
+    res.status(500).json({ error: "server error" });
   }
 };

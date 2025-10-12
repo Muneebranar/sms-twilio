@@ -317,18 +317,30 @@ exports.addTwilioNumber = async (req, res) => {
 /* ---------------------------------------------------
    9. GET ALL CUSTOMER CONSENTS / CHECK-INS
 --------------------------------------------------- */
+// controllers/adminController.js
 exports.getConsents = async (req, res) => {
   try {
     const items = await Checkin.find()
-      .populate("businessId", "name slug")
-      .sort({ createdAt: -1 })
-      .limit(200);
-    res.json({ ok: true, items });
+      .populate("businessId", "name slug country city")
+      .sort({ createdAt: -1 });
+
+    res.json({
+      ok: true,
+      list: items.map((item) => ({
+        _id: item._id,
+        phone: item.phone,
+        businessName: item.businessId?.name || "Unknown",
+        country: item.businessId?.country || "—",
+        createdAt: item.createdAt,
+        status: item.sentCompliance ? "Sent" : "Pending",
+      })),
+    });
   } catch (err) {
     console.error("❌ Failed to fetch check-ins:", err);
-    res.status(500).json({ error: "server error" });
+    res.status(500).json({ error: "Server error" });
   }
 };
+
 
 /* ---------------------------------------------------
    10. GET ALL INBOUND TWILIO EVENTS
@@ -342,3 +354,52 @@ exports.getInboundEvents = async (req, res) => {
     res.status(500).json({ error: "server error" });
   }
 };
+
+
+
+
+
+// //checkinlogs
+
+// exports.getConsents = async (req, res) => {
+//   try {
+//     // Fetch all check-ins and populate the business info
+//     const checkins = await Checkin.find()
+//       .populate("businessId", "name slug country city") // only needed fields
+//       .sort({ createdAt: -1 }); // latest first
+
+//     // Map check-ins to frontend-friendly format
+//     const list = await Promise.all(
+//       checkins.map(async (checkin) => {
+//         // Optional: Fetch inbound events for this check-in
+//         const inboundEvents = await InboundEvent.find({ checkinId: checkin._id }).sort({
+//           createdAt: -1,
+//         });
+
+//         return {
+//           _id: checkin._id,
+//           phone: checkin.phone,
+//           businessName: checkin.businessId?.name || "Unknown",
+//           businessSlug: checkin.businessId?.slug || "",
+//           country: checkin.businessId?.country || "—",
+//           createdAt: checkin.createdAt,
+//           status: checkin.sentCompliance ? "Sent" : "Pending",
+//           inboundEvents: inboundEvents.map((e) => ({
+//             fromNumber: e.fromNumber,
+//             body: e.body,
+//             eventType: e.eventType,
+//             createdAt: e.createdAt,
+//           })),
+//         };
+//       })
+//     );
+
+//     res.json({
+//       ok: true,
+//       list,
+//     });
+//   } catch (err) {
+//     console.error("❌ Failed to fetch check-ins:", err);
+//     res.status(500).json({ error: "Server error" });
+//   }
+// };
