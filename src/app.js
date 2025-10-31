@@ -1,7 +1,23 @@
 require("dotenv").config();
 const express = require("express");
-const helmet = require("helmet");
 const cors = require("cors");
+
+
+
+const app = express();
+
+app.use(cors({
+  origin: '*', // or ['http://localhost:5173']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
+// ✅ Handle preflight requests globally
+app.options('*', cors());
+
+
+
+const helmet = require("helmet");
 const morgan = require("morgan");
 const path = require("path");
 
@@ -11,18 +27,10 @@ const adminRoutes = require("./routes/admin");
 const smsRoutes = require('./controllers/smsController');
 
 
-const app = express();
 
 // 🛡️ Security & Middleware
 app.use(helmet());
-app.use(
-  cors({
-    // origin: process.env.CLIENT_URL || "*", // restrict later in production
-    origin: "*",
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    credentials: true,
-  })
-);
+
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
