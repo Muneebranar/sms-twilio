@@ -17,7 +17,8 @@ const app = express();
 app.use(helmet());
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "*", // restrict later in production
+    // origin: process.env.CLIENT_URL || "*", // restrict later in production
+    origin: "*",
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
   })
