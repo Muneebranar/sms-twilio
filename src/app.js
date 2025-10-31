@@ -6,14 +6,8 @@ const cors = require("cors");
 
 const app = express();
 
-app.use(cors({
-  origin: '*', // or ['http://localhost:5173']
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
+app.use(cors());
 
-// ✅ Handle preflight requests globally
-app.options('*', cors());
 
 
 
