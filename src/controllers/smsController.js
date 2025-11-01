@@ -196,6 +196,19 @@ router.put('/phones/:id', async (req, res) => {
   }
 });
 
+
+// ✅ DELETE all phone numbers
+router.delete('/phones/delete-all', async (req, res) => {
+  try {
+    await Phone.deleteMany({}); // ✅ Correct model name
+    console.log('✅ All phone numbers deleted successfully');
+    res.json({ success: true, message: 'All phone numbers deleted successfully' });
+  } catch (error) {
+    console.error('❌ Error deleting all phone numbers:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete all phone numbers' });
+  }
+});
+
 // DELETE phone
 router.delete('/phones/:id', async (req, res) => {
   try {
@@ -222,6 +235,8 @@ router.delete('/phones/:id', async (req, res) => {
     });
   }
 });
+
+
 
 // POST send SMS
 router.post('/send-sms', async (req, res) => {
