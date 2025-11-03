@@ -87,17 +87,19 @@ const adminUserSchema = new mongoose.Schema(
 );
 
 // Hash password before saving
+// Hash password before saving (only if not already hashed)
 adminUserSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
-  
-  try {
+
+  // 🛡️ Prevent double hashing (check if password already looks like bcrypt hash)
+  if (!this.password.startsWith("$2b$")) {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
-    next();
-  } catch (err) {
-    next(err);
   }
+
+  next();
 });
+
 
 // Compare password method
 adminUserSchema.methods.comparePassword = async function (candidatePassword) {

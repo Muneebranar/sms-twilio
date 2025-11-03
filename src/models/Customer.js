@@ -120,6 +120,10 @@ const customerSchema = new mongoose.Schema(
     ageVerifiedAt: {
       type: Date,
     },
+      // ✅ NEW FIELDS FOR BLOCKING/UNBLOCKING
+  blockDate: {
+    type: Date,
+  },
     metadata: {
       name: String,
       email: String,

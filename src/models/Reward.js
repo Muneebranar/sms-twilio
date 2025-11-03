@@ -11,17 +11,39 @@ const rewardSchema = new mongoose.Schema(
     name: { type: String, required: true },
     description: { type: String },
     threshold: { type: Number, required: true },
+    
+    // ✅ NEW: Discount fields
+    discountType: { 
+      type: String, 
+      enum: ['percentage', 'fixed', 'none'], 
+      default: 'none' 
+    },
+    discountValue: { 
+      type: Number, 
+      default: 0,
+      min: 0 
+    },
+    
     code: { type: String, unique: true, required: true },
     redeemed: { type: Boolean, default: false },
     redeemedAt: { type: Date },
     expiresAt: { type: Date },
-      expiryDays: { type: Number }, // ✅ newly added
-      // New added for age
-     priority: { type: Number, default: 1 },
-  isActive: { type: Boolean, default: true },
+    expiryDays: { type: Number },
+    priority: { type: Number, default: 1 },
+    isActive: { type: Boolean, default: true },
   },
   { timestamps: true }
 );
+
+// ✅ Virtual field for formatted discount display
+rewardSchema.virtual('discountDisplay').get(function() {
+  if (this.discountType === 'percentage') {
+    return `${this.discountValue}% off`;
+  } else if (this.discountType === 'fixed') {
+    return `$${this.discountValue} off`;
+  }
+  return 'No discount';
+});
 
 // ✅ Auto-delete issued rewards when a template is deleted
 rewardSchema.pre("findOneAndDelete", async function (next) {

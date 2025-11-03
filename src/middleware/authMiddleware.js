@@ -4,6 +4,8 @@ const User = require("../models/AdminUser");
 // 🔒 Middleware to protect routes (check JWT and attach user)
 async function protect(req, res, next) {
   const authHeader = req.headers.authorization;
+  console.log("🛡️ protect middleware triggered");
+
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return res.status(401).json({ error: "Unauthorized: No token provided" });
@@ -19,7 +21,7 @@ async function protect(req, res, next) {
     if (decoded.id === "default-admin") {
       req.user = {
         id: "default-admin",
-        role: "superadmin",
+        role: "master",
         name: "Default Admin",
         email: process.env.DEFAULT_ADMIN_EMAIL || "admin@example.com",
       };

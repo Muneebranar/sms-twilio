@@ -701,7 +701,8 @@ const PointsLedger = require("../models/PointsLedger");
   const Customer = require("../models/Customer");
     const CheckinLog = require("../models/CheckinLog");
     //const Reward = require("../models/Reward");
-const bcrypt = require("bcrypt");
+// const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const mongoose = require('mongoose');
 const fs = require("fs");
@@ -756,66 +757,6 @@ exports.createMasterAdmin = async (req, res) => {
   } catch (err) {
     console.error("Create Master Error:", err);
     res.status(500).json({ error: err.message });
-  }
-};
-
-/**
- * Login
- * POST /admin/login
- */
-
-// 🧩 Environment variables for default admin
-
-exports.login = async (req, res) => {
-      console.log("asdasdasdasdasdasdasdasd");
-
-  try {
-    const { email, password } = req.body;
-
-
-    // 🛑 Validate input
-    if (!email || !password) {
-      return res.status(400).json({ ok: false, error: "Email and password required" });
-    }
-
-    const DEFAULT_ADMIN_EMAIL = process.env.DEFAULT_ADMIN_EMAIL || "darronwilliams@verizon.net";
-    const DEFAULT_ADMIN_PASSWORD = process.env.DEFAULT_ADMIN_PASSWORD || "EngageDFW@#";
-    const JWT_SECRET = process.env.JWT_SECRET || "muneeb";
-
-    // ✅ Check against default admin credentials
-    if (email === DEFAULT_ADMIN_EMAIL && password === DEFAULT_ADMIN_PASSWORD) {
-      // 🔐 Generate JWT token
-      const token = jwt.sign(
-        {
-          id: "default-admin",
-          role: "sdasda",
-        },
-        JWT_SECRET,
-        { expiresIn: "7d" }
-      );
-
-      // 🧩 Debug log
-      console.log("✅ Default admin login successful. Token generated:", token);
-
-      // ✅ Respond with token and admin info
-      return res.status(200).json({
-        ok: true,
-        message: "Login successful",
-        token,
-        user: {
-          id: "default-admin",
-          name: "Admin",
-          email: DEFAULT_ADMIN_EMAIL,
-          role: "lskjdasldhadasdjhajhkjhk",
-        },
-      });
-    }
-
-    // ❌ Invalid credentials
-    return res.status(401).json({ ok: false, error: "Invalid credentials" });
-  } catch (err) {
-    console.error("❌ Login Error:", err);
-    res.status(500).json({ ok: false, error: "Server error during login" });
   }
 };
 
@@ -1047,42 +988,6 @@ exports.updateBusinessSettings = async (req, res) => {
   }
 };
 
-/**
- * Toggle Twilio number assignment for business
- * PUT /admin/business/:id/twilio-number
- */
-// exports.assignTwilioNumber = async (req, res) => {
-//   try {
-//     const { twilioNumber, isActive } = req.body;
-
-//     const business = await Business.findById(req.params.id);
-//     if (!business) {
-//       return res.status(404).json({ error: "Business not found" });
-//     }
-
-//     // Check access
-//     if (
-//       req.user.role !== "master" &&
-//       business._id.toString() !== req.user.businessId.toString()
-//     ) {
-//       return res.status(403).json({ error: "Access denied" });
-//     }
-
-//     business.twilioNumber = twilioNumber;
-//     business.twilioNumberActive = isActive !== undefined ? isActive : true;
-
-//     await business.save();
-
-//     res.json({
-//       ok: true,
-//       message: "Twilio number updated successfully",
-//       business,
-//     });
-//   } catch (err) {
-//     console.error("Assign Twilio Number Error:", err);
-//     res.status(500).json({ error: err.message });
-//   }
-// };
 
 
 exports.assignTwilioNumber = async (req, res) => {
@@ -1217,92 +1122,263 @@ exports.getBusinessStats = async (req, res) => {
 --------------------------------------------------- */
 exports.createAdmin = async (req, res) => {
   try {
-    const { email, password, name, role, businessId } = req.body;
-    
-    if (!email || !password || !role) {
-      return res.status(400).json({ error: "email, password, and role required" });
-    }
+    const { name, email, password, role, businessId } = req.body;
 
-    // Validate role
-    if (!['master', 'admin', 'staff'].includes(role)) {
-      return res.status(400).json({ error: "Invalid role" });
-    }
+    const existing = await AdminUser.findOne({ email });
+    if (existing) return res.status(400).json({ ok: false, error: "Email already exists" });
 
-    // Admin/Staff must have businessId
-    if ((role === 'admin' || role === 'staff') && !businessId) {
-      return res.status(400).json({ error: "businessId required for admin/staff" });
-    }
+    const hashedPassword = await bcrypt.hash(password, 10);
+    // ✅ Define valid roles
+const validRoles = ["staff", "admin", "master"];
 
-    const hashed = await bcrypt.hash(password, 10);
-    const admin = await AdminUser.create({ 
-      email, 
-      password: hashed, 
+// ✅ Fallback to "staff" if role is missing or invalid
+const userRole = validRoles.includes(role) ? role : "staff";
+
+    const newUser = await AdminUser.create({
       name,
-      role,
-      businessId: role === 'master' ? null : businessId
+      email,
+      password: hashedPassword,
+      role: userRole,   // <-- use the validated/fallback role,
+      businessId,
     });
-    
-    res.json({ ok: true, id: admin._id, role: admin.role });
+
+    res.status(201).json({ ok: true, message: "Admin created successfully", user: newUser });
   } catch (err) {
-    console.error("❌ Failed to create admin:", err);
-    res.status(500).json({ error: "server error" });
+    console.error("Error creating admin:", err);
+    res.status(500).json({ ok: false, error: "Server error during creation" });
   }
 };
 
-/* ---------------------------------------------------
-   3. ADMIN LOGIN → RETURNS JWT TOKEN
---------------------------------------------------- */
+
+
+
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // ✅ Validate input
     if (!email || !password) {
-      return res.status(400).json({ error: "Email and password are required" });
+      return res.status(400).json({ ok: false, error: "Email and password required" });
     }
 
-    // ✅ Find admin by email
-    const admin = await AdminUser.findOne({ email });
-    if (!admin) {
-      return res.status(401).json({ error: "Invalid credentials" });
+    const DEFAULT_ADMIN_EMAIL = process.env.DEFAULT_ADMIN_EMAIL || "darronwilliams@verizon.net";
+    const DEFAULT_ADMIN_PASSWORD = process.env.DEFAULT_ADMIN_PASSWORD || "EngageDFW@#";
+    const JWT_SECRET = process.env.JWT_SECRET || "muneeb";
+
+    // ✅ Step 1: Check Default Admin
+    if (email === DEFAULT_ADMIN_EMAIL && password === DEFAULT_ADMIN_PASSWORD) {
+      const token = jwt.sign({ id: "default-admin", role: "master" }, JWT_SECRET, { expiresIn: "7d" });
+      return res.status(200).json({
+        ok: true,
+        message: "Login successful",
+        token,
+        user: {
+          id: "default-admin",
+          name: "Admin",
+          email: DEFAULT_ADMIN_EMAIL,
+          role: "master",
+          lastLogin: new Date(),
+        },
+      });
     }
 
-    // ✅ Compare password
-    const isMatch = await bcrypt.compare(password, admin.password);
+    // ✅ Step 2: Check Database Users (with populate)
+    const user = await AdminUser.findOne({ email }).populate("businessId", "name");
+    if (!user) {
+      return res.status(404).json({ ok: false, error: "User not found" });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(401).json({ error: "Invalid credentials" });
+      return res.status(401).json({ ok: false, error: "Invalid password" });
     }
 
-    // ✅ Generate JWT
-    const token = jwt.sign(
-      {
-        id: admin._id,
-        email: admin.email,
-        role: admin.role,
-        businessId: admin.businessId,
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
+    // ✅ Step 3: Update last login timestamp
+    user.lastLogin = new Date();
+    await user.save();
 
-    // ✅ Return success response
+    // ✅ Step 4: Generate JWT for normal admins
+    const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET, { expiresIn: "7d" });
+
+    // ✅ CRITICAL FIX: Extract businessId and businessName properly
+    const businessId = user.businessId?._id 
+      ? String(user.businessId._id)  // If populated, get _id
+      : user.businessId 
+        ? String(user.businessId)    // If not populated, convert to string
+        : undefined;                  // If null/undefined, leave undefined
+
+    const businessName = user.businessId?.name || undefined;
+
     res.status(200).json({
       ok: true,
       message: "Login successful",
       token,
       user: {
-        id: admin._id,
-        name: admin.name,
-        email: admin.email,
-        role: admin.role,
-        businessId: admin.businessId,
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        businessId: businessId,           // ✅ Always a string now
+        businessName: businessName,        // ✅ Extract name from populated object
+        lastLogin: user.lastLogin,
       },
     });
   } catch (err) {
-    console.error("❌ Login error:", err.message);
-    res.status(500).json({ error: "Server error. Please try again later." });
+    console.error("❌ Login Error:", err);
+    res.status(500).json({ ok: false, error: "Server error during login" });
   }
 };
+
+
+
+
+// ===================================================
+// USER MANAGEMENT
+// ===================================================
+
+// --- GET ALL USERS ---
+exports.getAllUsers = async (req, res) => {
+  try {
+    const users = await AdminUser.find()
+      .populate("businessId", "name slug")
+      .sort({ createdAt: -1 });
+
+    res.json({ ok: true, users });
+  } catch (err) {
+    console.error("Fetch users error:", err);
+    res.status(500).json({ ok: false, error: "Server error" });
+  }
+};
+
+// --- CREATE USER (admin/staff) ---
+exports.createUser = async (req, res) => {
+  try {
+    const { name, email, password, role, businessId } = req.body;
+
+    const existing = await AdminUser.findOne({ email });
+    if (existing)
+      return res.status(400).json({ ok: false, error: "Email already in use" });
+
+    if (role !== "master" && !businessId)
+      return res
+        .status(400)
+        .json({ ok: false, error: "Business ID is required for this role" });
+
+    const hashed = await bcrypt.hash(password, 10);
+
+    const user = await AdminUser.create({
+      name,
+      email,
+      password: hashed,
+      role,
+      businessId: role !== "master" ? businessId : null,
+    });
+
+    res.json({ ok: true, user });
+  } catch (err) {
+    console.error("Create user error:", err);
+    res.status(500).json({ ok: false, error: "Server error" });
+  }
+};
+
+
+exports.updateUser = async (req, res) => {
+  try {
+    const { name, role, businessId, isActive, permissions, password } = req.body;
+
+    const user = await AdminUser.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ ok: false, error: "User not found" });
+    }
+
+    // 🛡 Permission checks
+    if (req.user.role === "staff") {
+      return res.status(403).json({ ok: false, error: "Staff cannot update users" });
+    }
+
+    if (req.user.role === "admin" && user.role === "admin") {
+      return res.status(403).json({ ok: false, error: "Admins cannot update other admins" });
+    }
+
+    // ✏️ Update allowed fields
+    if (name) user.name = name;
+    if (isActive !== undefined) user.isActive = isActive;
+
+    // 🔒 Only master can modify role, business, and permissions
+    if (req.user.role === "master") {
+      if (role) user.role = role;
+      if (businessId) user.businessId = businessId;
+      if (permissions) {
+        user.permissions = { ...user.permissions, ...permissions };
+      }
+    }
+
+    // 🔑 Optional: allow password change (hashed)
+    if (password && password.trim().length > 0) {
+      const bcrypt = require("bcryptjs");
+      user.password = await bcrypt.hash(password, 10);
+    }
+
+    await user.save();
+
+    res.json({
+      ok: true,
+      message: "✅ User updated successfully",
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        businessId: user.businessId,
+        isActive: user.isActive,
+        permissions: user.permissions,
+      },
+    });
+  } catch (err) {
+    console.error("❌ Update User Error:", err);
+res.status(500).json({ ok: false, error: err.message });
+
+  }
+};
+
+
+exports.deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    // 🛡 Safety: prevent self-deletion
+    if (req.user._id.toString() === id) {
+      return res.status(400).json({ ok: false, error: "You cannot delete your own account" });
+    }
+
+    // 🧩 Fetch target user
+    const targetUser = await AdminUser.findById(id);
+    if (!targetUser) {
+      return res.status(404).json({ ok: false, error: "User not found" });
+    }
+
+    // 🛡 Role-based access control
+    if (req.user.role === "staff") {
+      return res.status(403).json({ ok: false, error: "Staff cannot delete users" });
+    }
+
+    if (req.user.role === "admin" && targetUser.role === "admin") {
+      return res.status(403).json({ ok: false, error: "Admins cannot delete other admins" });
+    }
+
+    // 🗑 Perform deletion
+    await AdminUser.findByIdAndDelete(id);
+
+    res.json({
+      ok: true,
+      message: `✅ User '${targetUser.name}' deleted successfully`,
+    });
+  } catch (err) {
+    console.error("❌ Delete User Error:", err);
+    res.status(500).json({ ok: false, error: "Server error while deleting user" });
+  }
+};
+
+
+
 /* ---------------------------------------------------
    4. CREATE BUSINESS
 --------------------------------------------------- */
@@ -1351,7 +1427,18 @@ exports.createBusiness = async (req, res) => {
 exports.updateBusiness = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, slug, twilioNumber, rewardPoints, branding, ageGateEnabled, ageGateMinAge } = req.body;
+    const { 
+      name, 
+      slug, 
+      twilioNumber, 
+      rewardPoints, 
+      rewardThreshold,  // ✅ Added this
+      welcomeText,       // ✅ Added this
+      timezone,          // ✅ Added this
+      branding, 
+      ageGateEnabled, 
+      ageGateMinAge 
+    } = req.body;
 
     const business = await Business.findById(id);
     if (!business) {
@@ -1363,21 +1450,49 @@ exports.updateBusiness = async (req, res) => {
       return res.status(403).json({ error: "Access denied" });
     }
 
-    if ((name && !slug) || (!name && slug)) {
-      return res.status(400).json({ error: "Both name and slug required if changing name or slug" });
+    // ✅ FIXED: Only validate if name is ACTUALLY changing
+    const isNameChanging = name && name !== business.name;
+    const isSlugChanging = slug && slug !== business.slug;
+
+    // If name is changing, require slug to be provided
+    if (isNameChanging && !slug) {
+      return res.status(400).json({ 
+        error: "Slug required when changing business name" 
+      });
     }
 
+    // If slug is changing, verify it's not taken
+    if (isSlugChanging) {
+      const existingBusiness = await Business.findOne({ 
+        slug, 
+        _id: { $ne: id } 
+      });
+      if (existingBusiness) {
+        return res.status(400).json({ 
+          error: "Slug already in use by another business" 
+        });
+      }
+    }
+
+    // Validate Twilio number if provided
     let selectedTwilio = null;
     if (twilioNumber) {
       selectedTwilio = await TwilioNumber.findOne({ number: twilioNumber });
-      if (!selectedTwilio)
+      if (!selectedTwilio) {
         return res.status(400).json({ error: "Invalid Twilio number" });
+      }
     }
 
+    // ✅ Update fields
     if (name) business.name = name;
     if (slug) business.slug = slug;
     if (selectedTwilio) business.twilioNumber = selectedTwilio.number;
     if (rewardPoints !== undefined) business.rewardPoints = rewardPoints;
+    if (rewardThreshold !== undefined) business.rewardThreshold = rewardThreshold;
+    if (welcomeText !== undefined) business.welcomeText = welcomeText;
+    if (timezone !== undefined) business.timezone = timezone;
+    
+    // Update branding
     if (branding) {
       business.branding = {
         ...business.branding,
@@ -1385,7 +1500,7 @@ exports.updateBusiness = async (req, res) => {
       };
     }
     
-    // ✅ Update age gate settings
+    // Update age gate settings
     if (ageGateEnabled !== undefined) {
       business.ageGate = business.ageGate || {};
       business.ageGate.enabled = ageGateEnabled;
@@ -1404,7 +1519,6 @@ exports.updateBusiness = async (req, res) => {
     res.status(500).json({ error: "Failed to update business" });
   }
 };
-
 /* ---------------------------------------------------
    6. GET BUSINESS BY SLUG
 --------------------------------------------------- */
@@ -1420,6 +1534,33 @@ exports.getBusiness = async (req, res) => {
   }
 };
 
+// ✅ GET SINGLE BUSINESS BY ID
+exports.getBusinessById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Validate ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ ok: false, error: "Invalid business ID" });
+    }
+    
+    const business = await Business.findById(id);
+    
+    if (!business) {
+      return res.status(404).json({ ok: false, error: "Business not found" });
+    }
+
+    // ✅ Security: Regular admins can only view their own business
+    if (req.user.role === 'admin' && req.user.businessId?.toString() !== id) {
+      return res.status(403).json({ ok: false, error: "Access denied to this business" });
+    }
+
+    res.json({ ok: true, business });
+  } catch (err) {
+    console.error("❌ Error fetching business by ID:", err);
+    res.status(500).json({ ok: false, error: "Server error" });
+  }
+};
 /* ---------------------------------------------------
    7. GET ALL BUSINESSES (filtered by role)
 --------------------------------------------------- */
@@ -1427,20 +1568,19 @@ exports.getAllBusinesses = async (req, res) => {
   try {
     let query = {};
     
-    // ✅ Admin/Staff can only see their business
-    if (req.user.role === 'admin' || req.user.role === 'staff') {
-      query.businessId = req.user.businessId;
+    // ✅ Regular admins can only see their own business
+    if (req.user.role === 'admin' && req.user.businessId) {
+      query._id = req.user.businessId;
     }
-    // Master can see all
+    // Master/SuperAdmin see all businesses (no filter)
     
-    const list = await Business.find(query).sort({ createdAt: -1 });    
+    const list = await Business.find(query).sort({ createdAt: -1 });
     res.json({ ok: true, list });
   } catch (err) {
-    console.error("❌ Failed to fetch businesses:", err);
-    res.status(500).json({ error: "server error" });
+    console.error("❌ Error fetching businesses:", err);
+    res.status(500).json({ ok: false, error: "Server error" });
   }
 };
-
 /* ---------------------------------------------------
    8. UPLOAD LOGO
 --------------------------------------------------- */
@@ -1609,7 +1749,7 @@ exports.getInboundEvents = async (req, res) => {
     if (req.user.role === 'admin' || req.user.role === 'staff') {
       query.businessId = req.user.businessId;
     }
-    
+
     const items = await InboundEvent.find(query)
       .populate("checkinId", "phone businessId")
       .populate("businessId", "name slug")
@@ -1619,7 +1759,8 @@ exports.getInboundEvents = async (req, res) => {
 
     const list = items.map((e) => ({
       _id: e._id,
-      from: e.fromNumber,
+      from: e.fromNumber?.startsWith("+") ? e.fromNumber : `+${e.fromNumber}`,
+      to: e.toNumber?.startsWith("+") ? e.toNumber : `+${e.toNumber}`,
       message: e.body,
       type: e.eventType,
       businessName: e.businessId?.name || "Unknown",
@@ -1633,6 +1774,7 @@ exports.getInboundEvents = async (req, res) => {
   }
 };
 
+
 /* ---------------------------------------------------
    13. HANDLE INBOUND TWILIO WEBHOOK
 --------------------------------------------------- */
@@ -1640,16 +1782,18 @@ exports.handleInboundTwilio = async (req, res) => {
   try {
     const { From, To, Body } = req.body;
 
-    const fromNumber = From ? From.replace("+", "") : null;
-    const toNumber = To?.replace("+", "") || "Unknown";
+    // Always keep + prefix
+    const fromNumber = From?.startsWith("+") ? From : `+${From}`;
+    const toNumber = To?.startsWith("+") ? To : `+${To}`;
 
-    const checkin = await Checkin.findOne({
-      phone: fromNumber ? `+${fromNumber}` : null,
-    }).sort({ createdAt: -1 });
+    // Find checkin by sender number
+    const checkin = await Checkin.findOne({ phone: fromNumber }).sort({ createdAt: -1 });
 
     const inbound = await InboundEvent.create({
       checkinId: checkin?._id || null,
+      businessId: checkin?.businessId || null, // ✅ link business if known
       fromNumber,
+       toNumber,         
       body: Body,
       eventType: "INBOUND_SMS",
       raw: req.body,
@@ -1661,6 +1805,7 @@ exports.handleInboundTwilio = async (req, res) => {
     res.status(500).json({ ok: false, error: "Server error" });
   }
 };
+
 
 /* ---------------------------------------------------
    14. REWARD SETTINGS
@@ -1697,12 +1842,25 @@ exports.redeemReward = async (req, res) => {
   try {
     const { id } = req.params;
     const reward = await Reward.findById(id);
-    if (!reward) return res.status(404).json({ ok: false, error: "Reward not found" });
+
+    if (!reward) 
+      return res.status(404).json({ ok: false, error: "Reward not found" });
+
+    // 🛡️ Ensure this is a customer reward, not a template
+    if (!reward.phone) {
+      return res.status(400).json({ ok: false, error: "Cannot redeem a template reward" });
+    }
+
+    // 🛑 Prevent double redemption
+    if (reward.redeemed) {
+      return res.status(400).json({ ok: false, error: "Reward already redeemed" });
+    }
 
     reward.redeemed = true;
+    reward.redeemedAt = new Date();
     await reward.save();
 
-    res.json({ ok: true, reward });
+    res.json({ ok: true, reward, message: "Reward successfully redeemed" });
   } catch (err) {
     console.error("❌ Error redeeming reward:", err);
     res.status(500).json({ ok: false, error: "Server error" });
@@ -1788,10 +1946,15 @@ exports.getAllRewards = async (req, res) => {
     if (req.user.role === 'admin' || req.user.role === 'staff') {
       query.businessId = req.user.businessId;
     }
-    
+
+    console.log("👤 Role:", req.user.role);
+    console.log("🔍 Query used:", query);
+
     const list = await Reward.find(query)
       .populate("businessId", "name slug")
       .sort({ createdAt: -1 });
+
+    console.log("📦 Rewards found:", list.length);
 
     res.json({ ok: true, list });
   } catch (err) {
@@ -1799,6 +1962,230 @@ exports.getAllRewards = async (req, res) => {
     res.status(500).json({ ok: false, error: "Server error" });
   }
 };
+
+
+
+
+
+//Graph Controller get checkin daily
+/**
+ * Get daily check-in statistics for the last 30 days
+ * GET /admin/checkins/daily-stats
+ * Uses CheckinLog collection to count check-ins
+ */
+exports.getDailyCheckinStats = async (req, res) => {
+  try {
+    const { businessId } = req.query;
+    
+    // DEBUGGING: Check what collections exist
+    console.log('CheckinLog model collection name:', CheckinLog.collection.name);
+    
+    // Count total documents
+    const totalDocs = await CheckinLog.countDocuments();
+    console.log('Total CheckinLog documents:', totalDocs);
+    
+    // Get current date
+    const now = new Date();
+    
+    // Calculate 30 days ago
+    const thirtyDaysAgo = new Date(now);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    thirtyDaysAgo.setHours(0, 0, 0, 0);
+
+    console.log('Fetching check-ins from:', thirtyDaysAgo, 'to:', now);
+
+    // Build query for CheckinLog
+    const matchQuery = {
+      createdAt: { $gte: thirtyDaysAgo },
+      status: { $ne: "cooldown" } // Only count successful check-ins
+    };
+
+    // Add businessId filter if provided
+    if (businessId) {
+      matchQuery.businessId = new mongoose.Types.ObjectId(businessId);
+    }
+
+    console.log('Match query:', JSON.stringify(matchQuery));
+    
+    // Count matching documents
+    const matchingDocs = await CheckinLog.countDocuments(matchQuery);
+    console.log('Matching documents:', matchingDocs);
+    
+    // Get sample documents for debugging
+    const sampleDocs = await CheckinLog.find(matchQuery).limit(3).lean();
+    console.log('Sample documents:', JSON.stringify(sampleDocs, null, 2));
+
+    // Aggregate check-ins by date from CheckinLog
+    const dailyStats = await CheckinLog.aggregate([
+      { $match: matchQuery },
+      {
+        $group: {
+          _id: {
+            $dateToString: { 
+              format: "%Y-%m-%d", 
+              date: "$createdAt"
+            }
+          },
+          totalCheckins: { $sum: 1 },
+          uniqueCustomers: { $addToSet: "$phone" }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          date: "$_id",
+          totalCheckins: 1,
+          uniqueCustomers: { $size: "$uniqueCustomers" }
+        }
+      },
+      { $sort: { date: 1 } }
+    ]);
+
+    console.log(`Found ${dailyStats.length} days with check-ins`);
+    console.log('All daily stats:', JSON.stringify(dailyStats, null, 2));
+
+    // Create a map for quick lookup
+    const statsMap = new Map(
+      dailyStats.map(stat => [stat.date, stat])
+    );
+
+    // Fill in missing dates with 0
+    const filledStats = [];
+    for (let i = 29; i >= 0; i--) {
+      const date = new Date(now);
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0];
+      
+      const existingStat = statsMap.get(dateStr);
+      filledStats.push({
+        date: dateStr,
+        totalCheckins: existingStat?.totalCheckins || 0,
+        uniqueCustomers: existingStat?.uniqueCustomers || 0
+      });
+    }
+
+    // Get today's stats specifically for debugging
+    const todayStr = now.toISOString().split('T')[0];
+    const todayStats = filledStats.find(s => s.date === todayStr);
+    console.log('Today\'s stats:', todayStats);
+    console.log('Last 5 days:', filledStats.slice(-5));
+
+    res.json({
+      success: true,
+      data: filledStats,
+      debug: {
+        collectionName: CheckinLog.collection.name,
+        totalDocuments: totalDocs,
+        matchingDocuments: matchingDocs,
+        totalDaysWithData: dailyStats.length,
+        todayDate: todayStr,
+        todayCheckins: todayStats?.totalCheckins || 0,
+        dateRange: {
+          from: thirtyDaysAgo.toISOString(),
+          to: now.toISOString()
+        },
+        sampleData: sampleDocs.length > 0 ? sampleDocs[0] : null
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching daily check-in stats:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch daily statistics',
+      message: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+};
+
+/**
+ * Get overall check-in summary statistics
+ * GET /admin/checkins/summary
+ */
+exports.getCheckinSummary = async (req, res) => {
+  try {
+    const { businessId } = req.query;
+    
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    thirtyDaysAgo.setHours(0, 0, 0, 0);
+
+    const matchQuery = {
+      status: { $ne: "cooldown" } // Only successful check-ins
+    };
+
+    if (businessId) {
+      matchQuery.businessId = new mongoose.Types.ObjectId(businessId);
+    }
+
+    // Get stats from CheckinLog
+    const [totalStats, recentStats] = await Promise.all([
+      // All-time stats from CheckinLog
+      CheckinLog.aggregate([
+        { $match: matchQuery },
+        {
+          $group: {
+            _id: null,
+            totalCheckins: { $sum: 1 },
+            uniqueCustomers: { $addToSet: "$phone" }
+          }
+        },
+        {
+          $project: {
+            _id: 0,
+            totalCheckins: 1,
+            uniqueCustomers: { $size: "$uniqueCustomers" }
+          }
+        }
+      ]),
+      
+      // Last 30 days stats
+      CheckinLog.aggregate([
+        { 
+          $match: { 
+            ...matchQuery,
+            createdAt: { $gte: thirtyDaysAgo }
+          } 
+        },
+        {
+          $group: {
+            _id: null,
+            recentCheckins: { $sum: 1 },
+            activeCustomers: { $addToSet: "$phone" }
+          }
+        },
+        {
+          $project: {
+            _id: 0,
+            recentCheckins: 1,
+            activeCustomers: { $size: "$activeCustomers" }
+          }
+        }
+      ])
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        totalCheckins: totalStats[0]?.totalCheckins || 0,
+        uniqueCustomers: totalStats[0]?.uniqueCustomers || 0,
+        recentCheckins: recentStats[0]?.recentCheckins || 0,
+        activeCustomers: recentStats[0]?.activeCustomers || 0
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching check-in summary:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch check-in summary',
+      message: error.message
+    });
+  }
+};
+
+
+
 
 /* ---------------------------------------------------
    18. GET REWARD HISTORY

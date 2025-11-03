@@ -6,7 +6,9 @@ const InboundEventSchema = new Schema({
   businessId: { type: Schema.Types.ObjectId, ref: "Business" }, // ✅ add this
 
   fromNumber: String,
+  
   body: String,
+  toNumber: String, // ✅ add this
   eventType: String,
   raw: Schema.Types.Mixed,
 }, { timestamps: true });

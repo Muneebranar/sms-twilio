@@ -5,7 +5,7 @@ const Reward = require("../models/Reward");
 
 /**
  * Search and filter customers
- * GET /admin/customers?phone=xxx&businessId=xxx&status=xxx&page=1&limit=50
+ * GET /admin/customers?phone=xxx&businessId=xxx&status=xxx&code=xxx&page=1&limit=50
  */
 exports.searchCustomers = async (req, res) => {
   try {
@@ -13,6 +13,7 @@ exports.searchCustomers = async (req, res) => {
       phone = "",
       businessId,
       status,
+      code = "", // ✅ Search by reward code
       page = 1,
       limit = 50,
     } = req.query;
@@ -20,7 +21,7 @@ exports.searchCustomers = async (req, res) => {
     // Build query based on role
     let query = {};
 
-    if (req.user.role === "master") {
+    if (req.user.role === "master" || req.user.role === "superadmin") {
       // Master can see all businesses
       if (businessId) query.businessId = businessId;
     } else {
@@ -28,8 +29,31 @@ exports.searchCustomers = async (req, res) => {
       query.businessId = req.user.businessId;
     }
 
-    // Add filters
-    if (phone) {
+    // ✅ If searching by reward code, find the phone number first
+    if (code) {
+      const reward = await Reward.findOne({ 
+        code: code.trim().toUpperCase(),
+        businessId: query.businessId || req.user.businessId,
+      });
+
+      if (reward && reward.phone) {
+        query.phone = reward.phone;
+      } else {
+        // No reward found with this code
+        return res.json({
+          ok: true,
+          customers: [],
+          pagination: {
+            total: 0,
+            page: parseInt(page),
+            limit: parseInt(limit),
+            pages: 0,
+          },
+          message: "No customer found with this reward code",
+        });
+      }
+    } else if (phone) {
+      // Standard phone search
       query.phone = { $regex: phone, $options: "i" };
     }
 
@@ -81,6 +105,7 @@ exports.getCustomerDetails = async (req, res) => {
     // Check access
     if (
       req.user.role !== "master" &&
+      req.user.role !== "superadmin" &&
       customer.businessId._id.toString() !== req.user.businessId.toString()
     ) {
       return res.status(403).json({ error: "Access denied" });
@@ -94,7 +119,7 @@ exports.getCustomerDetails = async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(50);
 
-    // Fetch rewards history
+    // Fetch rewards history (both active and redeemed)
     const rewards = await Reward.find({
       phone: customer.phone,
       businessId: customer.businessId._id,
@@ -108,6 +133,73 @@ exports.getCustomerDetails = async (req, res) => {
     });
   } catch (err) {
     console.error("Get Customer Error:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * ✅ Search customer by reward code
+ * GET /admin/customers/by-code/:code
+ */
+exports.getCustomerByRewardCode = async (req, res) => {
+  try {
+    const { code } = req.params;
+
+    // Find reward by code
+    const reward = await Reward.findOne({ 
+      code: code.trim().toUpperCase() 
+    }).populate("businessId", "name slug");
+
+    if (!reward) {
+      return res.status(404).json({ 
+        ok: false,
+        error: "Reward code not found" 
+      });
+    }
+
+    // Check access
+    if (
+      req.user.role !== "master" &&
+      req.user.role !== "superadmin" &&
+      reward.businessId._id.toString() !== req.user.businessId.toString()
+    ) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    if (!reward.phone) {
+      return res.status(404).json({ 
+        ok: false,
+        error: "This is a reward template, not assigned to any customer" 
+      });
+    }
+
+    // Find customer
+    const customer = await Customer.findOne({
+      phone: reward.phone,
+      businessId: reward.businessId._id,
+    }).populate("businessId", "name slug logo");
+
+    if (!customer) {
+      return res.status(404).json({ 
+        ok: false,
+        error: "Customer not found" 
+      });
+    }
+
+    // Fetch their rewards
+    const rewards = await Reward.find({
+      phone: customer.phone,
+      businessId: customer.businessId._id,
+    }).sort({ createdAt: -1 });
+
+    res.json({
+      ok: true,
+      customer,
+      searchedReward: reward,
+      allRewards: rewards,
+    });
+  } catch (err) {
+    console.error("Get Customer By Code Error:", err);
     res.status(500).json({ error: err.message });
   }
 };
@@ -127,6 +219,7 @@ exports.addManualCheckin = async (req, res) => {
     // Check access
     if (
       req.user.role !== "master" &&
+      req.user.role !== "superadmin" &&
       customer.businessId.toString() !== req.user.businessId.toString()
     ) {
       return res.status(403).json({ error: "Access denied" });
@@ -184,6 +277,7 @@ exports.updateSubscriberStatus = async (req, res) => {
     // Check access
     if (
       req.user.role !== "master" &&
+      req.user.role !== "superadmin" &&
       customer.businessId.toString() !== req.user.businessId.toString()
     ) {
       return res.status(403).json({ error: "Access denied" });
@@ -220,6 +314,7 @@ exports.updateCustomer = async (req, res) => {
     // Check access
     if (
       req.user.role !== "master" &&
+      req.user.role !== "superadmin" &&
       customer.businessId.toString() !== req.user.businessId.toString()
     ) {
       return res.status(403).json({ error: "Access denied" });
@@ -262,6 +357,7 @@ exports.deleteCustomer = async (req, res) => {
 
     if (
       req.user.role !== "master" &&
+      req.user.role !== "superadmin" &&
       customer.businessId.toString() !== req.user.businessId.toString()
     ) {
       return res.status(403).json({ error: "Access denied" });
@@ -280,3 +376,5 @@ exports.deleteCustomer = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+module.exports = exports;

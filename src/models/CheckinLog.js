@@ -17,12 +17,11 @@ const CheckinLogSchema = new Schema({
     type: String, 
     default: '+1' 
   },
-  
   status: {
-    type: String,
-    enum: ['manual', 'kiosk', 'api'],
-    default: 'kiosk'
-  },
+  type: String,
+  enum: ['manual', 'kiosk', 'api', 'success'],
+  default: 'kiosk'
+},
   
   addedBy: { 
     type: Schema.Types.ObjectId, 

@@ -1,54 +1,105 @@
-// controllers/csvImportController.js
 const Customer = require("../models/Customer");
 const Business = require("../models/Business");
 const { parseCSV } = require("../utils/csvParser");
 
-/**
- * Import customers from CSV with merge logic
- * POST /admin/customers/import
- * Body: multipart/form-data with 'csv' file
- */
 exports.importCustomersCSV = async (req, res) => {
   try {
-    const { businessId } = req.body;
-    
-    // Validate business access
-    const business = await Business.findById(businessId);
-    if (!business) {
-      return res.status(404).json({ error: "Business not found" });
+    // Determine target business id (always keep it as a string)
+    const requestedBusinessId = req.body.businessId;
+    console.log("adasdadasdasdasdasdasdasdas",requestedBusinessId,req.user.role);
+    const targetBusinessId =
+      req.user.role === "master"
+        ? String(requestedBusinessId)
+        : String(req.user.businessId); // normalize to string
+
+    console.log("📦 CSV Import request:", {
+      userRole: req.user.role,
+      userId: req.user.id,
+      requestedBusinessId,
+      actualBusinessId: targetBusinessId,
+      fileName: req.file?.originalname,
+      fileSize: req.file?.size,
+    });
+
+    // Validate businessId
+    if (
+      !targetBusinessId ||
+      targetBusinessId === "null" ||
+      targetBusinessId === "undefined"
+    ) {
+      return res.status(400).json({
+        ok: false,
+        error: "Business ID is required for CSV import.",
+      });
     }
 
-    // Check role-based access
-    if (req.user.role === "admin" && req.user.businessId.toString() !== businessId) {
-      return res.status(403).json({ error: "Access denied to this business" });
+    // Find the business
+    const business = await Business.findById(targetBusinessId);
+    if (!business) {
+      return res.status(404).json({
+        ok: false,
+        error: "Business not found.",
+      });
+    }
+
+    console.log("✅ Business found:", business.name);
+
+    // Role-based access control
+    if (
+      req.user.role === "admin" &&
+      String(req.user.businessId) !== targetBusinessId
+    ) {
+      console.log(
+        "❌ Access denied: Admin trying to import to different business"
+      );
+      return res.status(403).json({
+        ok: false,
+        error: "Access denied. You can only import to your assigned business.",
+      });
     }
 
     if (req.user.role === "staff") {
-      return res.status(403).json({ error: "Staff cannot import CSV" });
+      console.log("❌ Access denied: Staff cannot import CSV");
+      return res.status(403).json({
+        ok: false,
+        error: "Staff members cannot import CSV files.",
+      });
     }
 
-    // Validate file upload
+    // Validate uploaded file
     if (!req.file) {
-      return res.status(400).json({ error: "No CSV file uploaded" });
-    }
-
-    // Check file size (max 5MB for ~20k rows)
-    if (req.file.size > 5 * 1024 * 1024) {
-      return res.status(400).json({ error: "File too large (max 5MB)" });
-    }
-
-    // Parse CSV
-    const { validRows, errors } = await parseCSV(req.file.buffer, business);
-
-    if (validRows.length === 0) {
       return res.status(400).json({
         ok: false,
-        message: "No valid rows found",
+        error: "No CSV file uploaded.",
+      });
+    }
+
+    // File size limit (5MB)
+    if (req.file.size > 5 * 1024 * 1024) {
+      return res.status(400).json({
+        ok: false,
+        error: "File too large (max 5MB).",
+      });
+    }
+
+    console.log("📊 Parsing CSV file...");
+
+    // Parse CSV into rows
+    const { validRows, errors } = await parseCSV(req.file.buffer, business);
+
+    console.log(
+      `📊 Parse results: ${validRows.length} valid rows, ${errors.length} errors`
+    );
+
+    if (!validRows || validRows.length === 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "No valid rows found in CSV file.",
         errors,
       });
     }
 
-    // Process in batches to avoid timeout
+    // Process in batches
     const BATCH_SIZE = 500;
     const results = {
       created: 0,
@@ -57,46 +108,78 @@ exports.importCustomersCSV = async (req, res) => {
       errors: [...errors],
     };
 
+    console.log(
+      `🔄 Processing ${validRows.length} rows in batches of ${BATCH_SIZE}...`
+    );
+
     for (let i = 0; i < validRows.length; i += BATCH_SIZE) {
       const batch = validRows.slice(i, i + BATCH_SIZE);
+      console.log(`📦 Processing batch ${Math.floor(i / BATCH_SIZE) + 1}...`);
 
       for (const row of batch) {
         try {
           const existing = await Customer.findOne({
             phone: row.phone,
-            businessId: row.businessId,
+            businessId: business._id,
           });
 
           if (existing) {
-            // Update points (add to existing)
+            // Update existing customer
             existing.points += row.points;
-            existing.metadata.name = row.metadata.name || existing.metadata.name;
-            existing.metadata.email = row.metadata.email || existing.metadata.email;
+
+            existing.metadata = {
+              ...existing.metadata,
+              name: row.metadata.name || existing.metadata?.name,
+              email: row.metadata.email || existing.metadata?.email,
+            };
+
             await existing.save();
             results.updated++;
+            console.log(
+              `✓ Updated: ${row.phone} (total points: ${existing.points})`
+            );
           } else {
             // Create new customer
-            await Customer.create({
-              ...row,
+            const newCustomer = await Customer.create({
+              phone: row.phone,
+              countryCode: row.countryCode,
+              businessId: business._id,
+              points: row.points,
               subscriberStatus: "active",
               consentGiven: false,
+              ageVerified: false,
               firstCheckinAt: new Date(),
+              metadata: {
+                name: row.metadata.name,
+                email: row.metadata.email,
+              },
             });
+
             results.created++;
+            console.log(`✓ Created: ${row.phone} (points: ${row.points})`);
           }
         } catch (err) {
+          console.error(`❌ Error processing ${row.phone}:`, err.message);
           results.errors.push({
             phone: row.phone,
-            reason: err.message,
+            reason: err.message || "Database error",
           });
           results.skipped++;
         }
       }
     }
 
+    console.log("✅ CSV Import completed:", {
+      totalRows: validRows.length,
+      created: results.created,
+      updated: results.updated,
+      skipped: results.skipped,
+      errorCount: results.errors.length,
+    });
+
     res.json({
       ok: true,
-      message: "Import completed",
+      message: "CSV import completed successfully.",
       results: {
         totalRows: validRows.length,
         created: results.created,
@@ -106,25 +189,36 @@ exports.importCustomersCSV = async (req, res) => {
       },
     });
   } catch (err) {
-    console.error("CSV Import Error:", err);
-    res.status(500).json({ error: "Import failed: " + err.message });
+    console.error("❌ CSV Import Error:", err);
+    res.status(500).json({
+      ok: false,
+      error: "Import failed: " + err.message,
+    });
   }
 };
 
+
+
 /**
- * Get import history
- * GET /admin/customers/import-history
+ * Get import history (for future implementation)
  */
 exports.getImportHistory = async (req, res) => {
   try {
-    // This would require an ImportLog model (future enhancement)
-    // For MVP, we'll just return a simple response
     res.json({
       ok: true,
-      message: "Import history not yet implemented",
+      message: "Import history not yet implemented.",
       history: [],
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({
+      ok: false,
+      error: err.message,
+    });
   }
+};
+
+module.exports = {
+  importCustomersCSV: exports.importCustomersCSV,
+  getImportHistory: exports.getImportHistory,
+  downloadSampleCSV: exports.downloadSampleCSV,
 };

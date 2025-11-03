@@ -371,10 +371,10 @@ const adminController = require("../controllers/adminController");
 const customerController = require("../controllers/customerController");
 const rewardController = require("../controllers/rewardController");
 const csvImportController = require("../controllers/csvImportController");
+const kioskController=require("../controllers/kioskController");
 const { protect } = require("../middleware/authMiddleware");
-const upload = require("../config/mutler"); // ✅ import Cloudinary multer
-
-
+const {upload,uploadCSV} = require("../config/mutler"); // ✅ import Cloudinary multer
+// const {uploadCSV } = require("../config/multer");
 
 
 // 🧩 Debug Logs — check which functions are actually loaded
@@ -383,34 +383,6 @@ console.log("✅ customerController:", Object.keys(customerController));
 console.log("✅ rewardController:", Object.keys(rewardController));
 console.log("✅ csvImportController:", Object.keys(csvImportController));
 console.log("csvImportController:", csvImportController);
-
-
-//router.use(protect);
-
-
-// Middleware (still imported, in case you want to re-enable later)
-
-// ✅ Multer setup
-// const storage = multer.diskStorage({
-//   destination: (req, file, cb) => cb(null, "uploads/"),
-//   filename: (req, file, cb) => {
-//     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-//     cb(null, file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname));
-//   },
-// });
-
-// const upload = multer({
-//   storage,
-//   limits: { fileSize: 5 * 1024 * 1024 },
-//   fileFilter: (req, file, cb) => {
-//     const allowedTypes = /jpeg|jpg|png|gif|csv/;
-//     const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-//     const mimetype = allowedTypes.test(file.mimetype);
-//     if (mimetype && extname) cb(null, true);
-//     else cb(new Error("Only images and CSV files are allowed"));
-//   },
-// });
-
 
 
 // ========================================
@@ -422,8 +394,19 @@ router.post("/login", adminController.login);//
 // TEMPORARILY UNPROTECTED ROUTES (for local testing)
 // ========================================
 router.use(protect);
+
+
+// USERS
+router.get("/users", adminController.getAllUsers);
+router.post("/users", adminController.createAdmin); // ✅ reuse createAdmin
+// router.post("/users", adminController.createUser);
+router.put("/users/:id", adminController.updateUser);
+router.delete("/users/:id", adminController.deleteUser);
+
+
 // --- BUSINESS MANAGEMENT ---
 router.get("/business",protect, adminController.getAllBusinesses);
+router.get("/business/:id", protect, adminController.getBusinessById);
 router.get("/business/:slug",protect, adminController.getBusiness);
 router.post("/business",protect, upload.single("logo"), adminController.createBusiness);
 router.put("/business/:id",protect, adminController.updateBusiness);
@@ -437,12 +420,18 @@ router.post("/twilio-numbers",protect, adminController.addTwilioNumber);
 
 // --- CHECK-IN LOGS ---
 router.get("/logs/consents",protect, adminController.getConsents);
+router.post("/inbound/twilio",protect, adminController.handleInboundTwilio);
 router.get("/logs/inbound",protect, adminController.getInboundEvents);
 
 // --- POINTS LEDGER ---
 router.get("/points-ledger",protect, adminController.getPointsLedger);
 router.get("/business/:id/points-ledger",protect, adminController.getBusinessPointsLedger);
 router.get("/business/:id/checkins",protect, adminController.getBusinessCheckins);
+
+
+// --- CHECK-IN STATISTICS --- ✨ ADD THESE TWO LINES
+router.get("/checkins/daily-stats", protect, adminController.getDailyCheckinStats);
+router.get("/checkins/summary", protect, adminController.getCheckinSummary);
 
 // --- REWARDS ---
 router.get("/rewards",protect, adminController.getAllRewards);
@@ -459,15 +448,29 @@ router.put("/business/:id/rewards/:rewardId", rewardController.updateBusinessRew
 router.put("/business/:id/rewards/:rewardId/redeem", rewardController.redeemReward);
 
 // --- CUSTOMER MANAGEMENT ---
+// Search with code support
+// router.get('/admin/customers', auth, customerController.searchCustomers);
+
+// New: Get customer by reward code
 router.get("/customers",protect, customerController.searchCustomers);
+router.get('/admin/customers/by-code/:code', protect, customerController.getCustomerByRewardCode);
 router.get("/customers/:id",protect , customerController.getCustomerDetails);
 router.post("/customers/:id/checkin", customerController.addManualCheckin);
 router.put("/customers/:id/status", customerController.updateSubscriberStatus);
 router.put("/customers/:id", customerController.updateCustomer);
 router.delete("/customers/:id", customerController.deleteCustomer);
 
+
+// Admin routes (by customer ID)
+router.post("/customers/:id/block", protect, kioskController.blockCustomerById);
+router.post("/customers/:id/unblock", protect, kioskController.unblockCustomerById);
+
+// Legacy kiosk routes (by phone)
+router.post("/admin/unblock-customer", protect, kioskController.unblockCustomer);
+router.post("/admin/block-customer", protect, kioskController.blockCustomer);
 // --- CSV IMPORT ---
-router.post("/customers/import", upload.single("csv"), csvImportController.importCustomersCSV);
+router.post("/customers/import", protect,uploadCSV.single("csv"), csvImportController.importCustomersCSV);
+// router.post("/customers/import", protect, uploadCSV.single("csv"), importCustomers);
 router.get("/customers/import-history", csvImportController.getImportHistory);
 router.post("/create-admin", adminController.createAdmin);
 
