@@ -13,6 +13,7 @@ const client = twilio(accountSid, authToken);
 
 
 
+
 // GET all admin phones
 router.get('/admin-phone', async (req, res) => {
   try {
@@ -31,43 +32,56 @@ router.get('/admin-phone', async (req, res) => {
   }
 });
 
-// POST new admin phone
+
+
+
+
+
+// POST new admin phone (single)
 router.post('/admin-phone', async (req, res) => {
   try {
     const { phone } = req.body;
 
-    if (!phone) {
-      return res.status(400).json({ 
+    if (!phone || typeof phone !== 'string' || !phone.trim()) {
+      return res.status(400).json({
         success: false,
-        message: 'Phone number is required' 
+        message: 'Phone number is required',
       });
     }
+
+    const trimmedPhone = phone.trim();
 
     // Check if phone already exists
-    const existingPhone = await TwilioPhone.findOne({ number: phone });
+    const existingPhone = await TwilioPhone.findOne({ number: trimmedPhone });
     if (existingPhone) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: 'This phone number already exists' 
+        message: 'Phone number already exists',
       });
     }
 
-    const newPhone = new TwilioPhone({ number: phone });
+    // Save new phone
+    const newPhone = new TwilioPhone({ number: trimmedPhone });
     await newPhone.save();
 
-    res.json({ 
+    res.status(201).json({
       success: true,
       phone: { id: newPhone._id, number: newPhone.number },
-      message: 'Admin phone number saved successfully' 
+      message: 'Admin phone number added successfully',
     });
+
   } catch (error) {
     console.error('Error saving admin phone:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      message: 'Failed to save admin phone number' 
+      message: 'Failed to save admin phone number',
     });
   }
 });
+ 
+
+
+
 
 // DELETE admin phone
 router.delete('/admin-phone/:id', async (req, res) => {
@@ -118,43 +132,85 @@ router.get('/phones', async (req, res) => {
   }
 });
 
-// POST new phone
+
+
+// POST new phones (single or batch insert)
 router.post('/phones', async (req, res) => {
   try {
-    const { phone } = req.body;
+    // Accept either a single phone string or an array of phones
+    let phoneArray = [];
 
-    if (!phone) {
-      return res.status(400).json({ 
+    if (req.body.phone) {
+      // Single phone upload
+      phoneArray = [req.body.phone.trim()];
+    } else if (req.body.phones && Array.isArray(req.body.phones)) {
+      // Batch upload
+      phoneArray = req.body.phones.map(p => p.trim());
+    }
+
+    // Validate input
+    if (phoneArray.length === 0) {
+      return res.status(400).json({
         success: false,
-        message: 'Phone number is required' 
+        message: 'No valid phone number(s) provided',
       });
     }
 
-    // Check if phone already exists
-    const existingPhone = await Phone.findOne({ number: phone });
-    if (existingPhone) {
-      return res.status(400).json({ 
-        success: false,
-        message: 'Phone number already exists' 
+    // Remove duplicates in the request itself
+    const uniquePhones = [...new Set(phoneArray)];
+
+    // Find which numbers already exist in DB
+    const existing = await Phone.find(
+      { number: { $in: uniquePhones } },
+      { number: 1, _id: 0 }
+    );
+    const existingNumbers = new Set(existing.map(p => p.number));
+
+    // Filter only new numbers
+    const newNumbers = uniquePhones.filter(p => !existingNumbers.has(p));
+
+    if (newNumbers.length === 0) {
+      return res.json({
+        success: true,
+        message: 'All phone numbers already exist',
+        phones: [],
+        count: 0,
       });
     }
 
-    const newPhone = new Phone({ number: phone });
-    await newPhone.save();
+    // Insert new numbers
+    const newPhoneDocs = newNumbers.map(number => ({ number }));
+    const inserted = await Phone.insertMany(newPhoneDocs, { ordered: false });
 
-    res.status(201).json({ 
-      success: true,
-      phone: { id: newPhone._id, number: newPhone.number },
-      message: 'Phone number added successfully' 
-    });
+    // Respond differently for single vs batch
+    if (req.body.phone) {
+      // Single phone upload
+      return res.status(201).json({
+        success: true,
+        phone: { id: inserted[0]._id, number: inserted[0].number },
+        message: 'Phone number added successfully',
+      });
+    } else {
+      // Batch upload
+      return res.status(201).json({
+        success: true,
+        phones: inserted.map(p => ({ id: p._id, number: p.number })),
+        count: inserted.length,
+        message: `Added ${inserted.length} new phone number(s) successfully`,
+      });
+    }
+
   } catch (error) {
-    console.error('Error adding phone:', error);
-    res.status(500).json({ 
+    console.error('Phone save error:', error);
+    res.status(500).json({
       success: false,
-      message: 'Failed to add phone number' 
+      message: 'Failed to save phone number(s)',
     });
   }
 });
+
+
+
 
 // PUT update phone
 router.put('/phones/:id', async (req, res) => {
@@ -265,6 +321,7 @@ router.post('/send-sms', async (req, res) => {
         to: toPhone
       })
     );
+    
 
     const results = await Promise.allSettled(promises);
 
